@@ -70,16 +70,6 @@ class DDGChat:
             "https://duckduckgo.com/?q=DuckDuckGo+AI+Chat&ia=chat&duckai=1",
             wait_until="domcontentloaded",
         )
-        try:
-            await self.page.wait_for_selector(
-                "button:has-text('Запустить чат'), button:has-text('Start chat')",
-                timeout=5000,
-            )
-            await self.page.locator(
-                "button:has-text('Запустить чат'), button:has-text('Start chat')"
-            ).click()
-        except:
-            pass
         await self._wait_for_input()
         self.ready_event.set() 
 
@@ -105,7 +95,7 @@ class DDGChat:
             btn = self.page.locator(
                 'button[type="button"]:has-text("Новый чат"), '
                 'button[type="button"]:has-text("Запустить чат"), '
-                'button[type="button"]:has-text("New chat"), '
+                'button[type="button"]:has-text("New Chat"), '
                 'button[type="button"]:has-text("Start chat")'
             )
             await btn.first.wait_for(timeout=3000)
@@ -177,7 +167,12 @@ class DDGChat:
 
     async def ask(self, messages: List[Dict[str, str]]):
         await self._refresh_headers()
-        return self._send(messages)
+        answer = self._send(messages)
+        try:
+            await self.page.evaluate("localStorage.removeItem('savedAIChats')")
+        except:
+            pass
+        return answer
 
 
 bot = DDGChat(headless=False)

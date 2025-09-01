@@ -24,6 +24,11 @@ On Linux with a virtual X server (xvfb):
 nohup xvfb-run -a -s "-screen 0 1920x1080x24" python server.py > server.log 2>&1 & disown
 ```
 
+To stop:
+```bash
+pkill -f "xvfb-run.*server.py"
+```
+
 ## Request examples
 Linux (Bash)
 ```bash
