@@ -38,12 +38,8 @@ curl -X POST http://localhost:8000/ask \
 ```
 Windows (PowerShell)
 ```powershell
-curl -Method POST "http://localhost:8000/ask" `
-  -ContentType "application/json" `
-  -Body '{
-    "messages": [
-      {"role": "user", "content": "Привет, кто ты?"}
-    ]
-  }'
+curl -X POST "http://localhost:8000/ask" ^
+-H "Content-Type: application/json" ^
+-d "{\"messages\": [{\"role\": \"user\", \"content\": \"Привет, кто ты?\"}]}"
 ```
 
