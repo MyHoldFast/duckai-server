@@ -267,16 +267,38 @@ class DDGChat:
 
     async def _refresh_headers(self):
         try:
-            el = self.input_field or await self._wait_for_input()
+            buttons = await self.page.querySelectorAll('button[type="button"]')
+            clicked = False
+            for b in buttons:
+                try:
+                    text = await self.page.evaluate('(el) => el.innerText', b)
+                    if text and text.strip().lower() in ["новый чат", "запустить чат", "new chat", "start chat"]:
+                        logger.info(f"Found chat button: {text.strip()}, clicking...")
+                        await b.click()
+                        await asyncio.sleep(0.5)
+                        clicked = True
+                        break
+                except Exception as e:
+                    logger.debug(f"Error reading button text: {e}")
+                    continue
+            if not clicked:
+                logger.debug("No 'New Chat' button found")
+        except Exception as e:
+            logger.debug(f"No 'New Chat' button found: {e}")
+
+        try:
+            el = await self._wait_for_input()
             if not el:
                 raise Exception("Input field not found for header refresh")
             await el.click()
             await el.type(" ")
-            await self.page.keyboard.press('Enter')
-            await asyncio.sleep(1.0)
+            await self.page.keyboard.press("Enter")
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error refreshing headers: {e}")
             raise
+
+
 
     def _filtered_headers(self):
         if not self.headers:
