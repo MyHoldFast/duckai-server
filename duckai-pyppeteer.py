@@ -18,6 +18,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = "your free gemini key"
+
+
 MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 URL_PROXY = os.environ.get("URL_PROXY")
@@ -121,7 +123,7 @@ class DDGChat:
         url = f"{BASE_URL}/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
         with open(image_path, "rb") as f:
             img_base64 = base64.b64encode(f.read()).decode("utf-8")
-        prompt = "where is the duck/duck on the captcha, give the answer as a 3*3 matrix in json"
+        prompt = "where is the ducks/duck on the captcha, be more careful, give the answer as a 3*3 matrix in json"
         payload = {
             "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/png", "data": img_base64}}]}],
             "generationConfig": {"responseModalities": ["TEXT"]}

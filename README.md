@@ -1,14 +1,14 @@
-# DuckAI-server
+# DuckAI Server
 
-A simple FastAPI server that runs DuckDuckGo AI.
-Two supported backends:
+A simple **FastAPI** server that runs DuckDuckGo AI.  
+Two backends are supported, but the **Pyppeteer version is recommended and more up to date**:
 
-* **Playwright** (default, more stable)
-* **Pyppeteer** (alternative, experimental)
+- **Pyppeteer** (preferred)
+- Playwright (alternative)
 
 ---
 
-## Installing dependencies
+## Installation
 
 It is recommended to use a virtual environment:
 
@@ -18,79 +18,85 @@ source venv/bin/activate  # Linux/macOS
 venv\Scripts\activate     # Windows PowerShell
 ```
 
-### For Playwright version
+### Pyppeteer version (recommended)
+
+```bash
+pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydantic
+```
+
+#### Gemini API Key (for CAPTCHA solving)
+
+1. Go to [Google AI Studio](https://aistudio.google.com/)
+2. Sign in with your Google account
+3. Click **Get API key** → **Create API key**
+4. Copy your generated key
+5. Set it in the script:
+
+```python
+GEMINI_API_KEY = "your free gemini key"
+```
+
+### Playwright version (optional)
 
 ```bash
 pip install fastapi uvicorn playwright requests pydantic
 playwright install chromium
 ```
 
-### For Pyppeteer version
-
-```bash
-pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydantic
-```
-
-**Important:** For the Pyppeteer version, set your Gemini API key in the script:
-
-```python
-GEMINI_API_KEY = "your free gemini key"
-```
-
 ---
 
-## Running the server
-
-### Playwright version
-
-On Linux with a virtual X server (xvfb):
-
-```bash
-nohup xvfb-run -a -s "-screen 0 1920x1080x24" python duckai-server.py > server.log 2>&1 & disown
-```
-
-To stop:
-
-```bash
-pkill -f "python.*duckai-server.py"
-```
+## Running the Server
 
 ### Pyppeteer version
 
-Run normally:
+Normal run:
 
 ```bash
 python duckai-pyppeteer.py
 ```
 
-To stop, use **Ctrl+\\** (SIGQUIT) instead of Ctrl+C, because Ctrl+C may not terminate the server properly.
-
-On Linux server, to keep it running after closing the SSH session:
+On Linux server (background mode):
 
 ```bash
 nohup python duckai-pyppeteer.py > server.log 2>&1 &
 disown
 ```
 
-To stop:
+Stop the server:
 
 ```bash
 pkill -f "python.*duckai-pyppeteer.py"
+pkill -f "chrome"
+```
+
+> Note: On some systems, use **Ctrl+\\** (SIGQUIT) instead of Ctrl+C to stop it properly.
+
+### Playwright version
+
+On Linux with a virtual X server (xvfb):
+
+```bash
+nohup xvfb-run -a -s "-screen 0 1920x1080x24" python duckai-server.py > server.log 2>&1 &
+disown
+```
+
+Stop:
+
+```bash
+pkill -f "python.*duckai-server.py"
 ```
 
 ---
 
-## Request examples
+## Example Request
 
 ### Linux (Bash)
 
 ```bash
-curl -X POST http://localhost:8000/ask \
--H "Content-Type: application/json" \
--d '{
-"messages": [
-{"role": "user", "content": "Hello, who are you?"}
-]
+curl -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{
+  "messages": [
+    {"role": "user", "content": "Hello, who are you?"}
+  ]
 }'
 ```
 
