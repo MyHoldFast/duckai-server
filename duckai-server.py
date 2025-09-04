@@ -83,11 +83,11 @@ class DDGChat:
     async def _wait_for_input(self):
         try:
             return await self.page.wait_for_selector(
-                'textarea[name="user-prompt"]', timeout=4000
+                'textarea[name="user-prompt"]', timeout=6000
             )
         except:
             return await self.page.wait_for_selector(
-                'div[contenteditable="true"]', timeout=4000
+                'div[contenteditable="true"]', timeout=6000
             )
 
     async def _refresh_headers(self):
@@ -130,13 +130,14 @@ class DDGChat:
 
     def _send(self, messages: List[Dict[str, str]]):
         payload = {
-            "model": "gpt-5-mini",
+            "model": "gpt-5-mini", #claude-3-5-haiku-latest mistralai/Mistral-Small-24B-Instruct-2501 meta-llama/Llama-4-Scout-17B-16E-Instruct gpt-4o-mini gpt-5-mini
             "metadata": {
                 "toolChoice": {
                     "NewsSearch": False,
                     "VideosSearch": False,
                     "LocalSearch": False,
                     "WeatherForecast": False,
+                    "WebSearch": False
                 }
             },
             "messages": messages,
