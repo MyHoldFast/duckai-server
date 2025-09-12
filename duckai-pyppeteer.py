@@ -1,9 +1,8 @@
 import asyncio
 import json
-import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pyppeteer import launch
 from pyppeteer_stealth import stealth
 from contextlib import asynccontextmanager
@@ -11,14 +10,13 @@ import logging
 import aiohttp
 import base64
 import re
-import psutil
-import sys, os
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = "your free gemini key"
 
+GEMINI_API_KEY = "your free gemini key"
 
 MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -38,6 +36,15 @@ MAX_CAPTCHA_ATTEMPTS = 2
 
 CLICK_DELAY = 0.25
 SUBMIT_DELAY = 1.5
+
+AVAILABLE_MODELS = [
+    "claude-3-5-haiku-latest",
+    "mistralai/Mistral-Small-24B-Instruct-2501", 
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    "gpt-4o-mini",
+    "gpt-5-mini"
+]
+DEFAULT_MODEL = "gpt-5-mini"
 
 class DDGChat:
     def __init__(self, headless: bool = True):
@@ -177,7 +184,6 @@ class DDGChat:
                 logger.error(f"Gemini HTTP error {response.status}: {response_text}")
                 return None
 
-
     async def click_captcha(self, matrix):
         try:
             if not isinstance(matrix, list) or len(matrix) != 3 or not all(isinstance(row, list) and len(row) == 3 for row in matrix):
@@ -203,7 +209,6 @@ class DDGChat:
         except Exception as e:
             logger.error(f"Error clicking captcha: {e}")
             return False
-
 
     async def _cleanup(self):
         try:
@@ -237,12 +242,11 @@ class DDGChat:
                     pass
             if self.browser:
                 try:
-                    proc = self.browser.process
                     await self.browser.close()
-                    if proc and psutil.pid_exists(proc.pid):
-                        proc.kill()
                 except:
                     pass
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
         finally:
             if self.session:
                 await self.session.close()
@@ -300,8 +304,6 @@ class DDGChat:
             logger.error(f"Error refreshing headers: {e}")
             raise
 
-
-
     def _filtered_headers(self):
         if not self.headers:
             return {}
@@ -315,9 +317,9 @@ class DDGChat:
             ]
         }
 
-    async def _send(self, messages: List[Dict[str, str]]):
+    async def _send(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
         payload = {
-            "model": "gpt-5-mini",
+            "model": model,
             "metadata": {"toolChoice": {"WebSearch": False}},
             "messages": messages,
             "canUseTools": True,
@@ -356,9 +358,13 @@ class DDGChat:
             return f"Request error: {str(e)}"
         return "".join(full_answer)
 
-    async def ask(self, messages: List[Dict[str, str]]):
+    async def ask(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
+        if model not in AVAILABLE_MODELS:
+            logger.warning(f"Model {model} not available, using default: {DEFAULT_MODEL}")
+            model = DEFAULT_MODEL
+            
         await self._refresh_headers()
-        answer = await self._send(messages)
+        answer = await self._send(messages, model)
         if answer == "CAPTCHA_REQUIRED":
             if self._captcha_attempts >= MAX_CAPTCHA_ATTEMPTS:
                 raise Exception("Captcha could not be solved after max attempts")
@@ -370,7 +376,7 @@ class DDGChat:
                 if not ok:
                     raise Exception("Failed to click captcha tiles")
                 await asyncio.sleep(1.0)
-                return await self.ask(messages)
+                return await self.ask(messages, model)
             else:
                 raise Exception("Failed to parse matrix from Gemini")
         self._captcha_attempts = 0
@@ -384,6 +390,7 @@ bot = DDGChat(headless=True)
 
 class Query(BaseModel):
     messages: List[Dict[str, str]]
+    model: Optional[str] = DEFAULT_MODEL
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -392,9 +399,12 @@ async def lifespan(app: FastAPI):
         yield
     except Exception as e:
         logger.error(f"Startup failed: {e}")
-        yield
+        raise
     finally:
-        await bot.stop()
+        try:
+            await bot.stop()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -403,33 +413,24 @@ async def ask_question(query: Query):
     if not bot.ready_event.is_set():
         raise HTTPException(status_code=503, detail="Bot not ready yet")
     try:
-        answer = await bot.ask(query.messages)
-        return {"answer": answer}
+        actual_model = query.model if query.model in AVAILABLE_MODELS else DEFAULT_MODEL
+        answer = await bot.ask(query.messages, actual_model)
+        return {"answer": answer, "model": actual_model}
     except Exception as e:
         if "CAPTCHA" in str(e):
             raise HTTPException(status_code=400, detail=str(e))
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ready" if bot.ready_event.is_set() else "not ready"}
-
-def handle_exit(*args):
-    logger.info("Shutting down gracefully...")
-    loop = asyncio.get_event_loop()
-    loop.create_task(bot.stop())
-    sys.exit(0)
-
 if __name__ == "__main__":
-    import uvicorn, sys, asyncio
-
-    if sys.platform.startswith("win"):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        loop="asyncio",
-    )
+    import uvicorn
+    try:
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+        )
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}")

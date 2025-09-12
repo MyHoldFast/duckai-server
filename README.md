@@ -15,7 +15,7 @@ It is recommended to use a virtual environment:
 ```bash
 python -m venv venv
 source venv/bin/activate  # Linux/macOS
-venv\Scripts\activate     # Windows PowerShell
+venv\Scripts\activate     # Windows
 ```
 
 ### Pyppeteer version (recommended)
@@ -88,9 +88,9 @@ pkill -f "python.*duckai-server.py"
 
 ---
 
-## Example Request
+## Basic Requests
 
-### Linux (Bash)
+### Request with default model (gpt-5-mini)
 
 ```bash
 curl -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{
@@ -99,11 +99,27 @@ curl -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{
   ]
 }'
 ```
+### Request with specific model
+```bash
+curl -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{
+  "messages": [
+    {"role": "user", "content": "Hello, who are you?"}
+  ],
+  "model": "gpt-4o-mini"
+}'
+```
 
-### Windows (PowerShell)
+### Windows (CMD)
 
 ```powershell
 curl -X POST "http://localhost:8000/ask" ^
 -H "Content-Type: application/json" ^
--d "{\"messages\": [{\"role\": \"user\", \"content\": \"Hello, how are you?\"}]}"
+-d "{\"messages\": [{\"role\": \"user\", \"content\": \"Hello, how are you?\"}], \"model\": \"gpt-5-mini\"}"
 ```
+## Available Models
+
+- `claude-3-5-haiku-latest`
+- `mistralai/Mistral-Small-24B-Instruct-2501`
+- `meta-llama/Llama-4-Scout-17B-16E-Instruct`
+- `gpt-4o-mini`
+- `gpt-5-mini` (default model)
