@@ -175,13 +175,13 @@ class DDGChat:
             return False
 
     async def solve_captcha_with_gemini(self, image_path: str):
-        """Use Gemini AI to solve captcha."""
+        """Use Gemini AI to solve captcha and return 3x3 matrix."""
         url = f"{BASE_URL}/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
         
         with open(image_path, "rb") as f:
             img_base64 = base64.b64encode(f.read()).decode("utf-8")
         
-        prompt = "Analyze the captcha and identify duck positions. Return a 3x3 matrix in JSON format where 1 indicates duck presence."
+        prompt = "where is the duck/duck on the captcha, give the answer as a 3*3 matrix in json"
         payload = {
             "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/png", "data": img_base64}}]}],
             "generationConfig": {"responseModalities": ["TEXT"]}
@@ -191,36 +191,72 @@ class DDGChat:
         
         try:
             async with self.session.post(url, json=payload, headers=headers) as response:
-                if response.status != 200:
-                    logger.error("Gemini API error: %s", await response.text())
+                response_text = await response.text()
+                
+                if response.status == 200:
+                    try:
+                        data = await response.json()
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            logger.error("No candidates in Gemini response")
+                            return None
+                        
+                        text_response = candidates[0]["content"]["parts"][0]["text"].strip()
+                        
+                        # Clean the response
+                        clean = re.sub(
+                            r"^```json\s*|^```\s*|\s*```$",
+                            "",
+                            text_response.strip(),
+                            flags=re.IGNORECASE
+                        )
+                        logger.info(f"Cleaned Gemini response:\n{clean}")
+
+                        # Try to parse as JSON
+                        try:
+                            parsed = json.loads(clean)
+                        except json.JSONDecodeError:
+                            # Fallback: extract matrix pattern
+                            m = re.search(r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]", clean, re.DOTALL)
+                            if not m:
+                                logger.error("No valid JSON or matrix pattern found")
+                                return None
+                            parsed = json.loads(m.group(0))
+
+                        # Extract matrix from different response formats
+                        if isinstance(parsed, dict):
+                            if "matrix" in parsed:
+                                matrix = parsed["matrix"]
+                            elif "answer" in parsed:
+                                matrix = parsed["answer"]
+                            elif "response" in parsed:
+                                matrix = parsed["response"]
+                            else:
+                                # Try to find any array value
+                                for key, value in parsed.items():
+                                    if isinstance(value, list) and len(value) == 3:
+                                        matrix = value
+                                        break
+                                else:
+                                    raise ValueError(f"Unexpected Gemini response format: {parsed}")
+                        else:
+                            matrix = parsed
+
+                        # Convert to integer matrix
+                        matrix = [[int(x) for x in row] for row in matrix]
+                        
+                        logger.info(f"Gemini matrix: {matrix}")
+                        return matrix
+                        
+                    except Exception as e:
+                        logger.error(f"Error parsing Gemini response: {e}\nRaw response: {response_text}")
+                        return None
+                else:
+                    logger.error(f"Gemini HTTP error {response.status}: {response_text}")
                     return None
-                
-                data = await response.json()
-                text_response = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                
-                # Clean and parse JSON response
-                clean_response = re.sub(r"^```json\s*|^```\s*|\s*```$", "", text_response, flags=re.IGNORECASE)
-                logger.debug("Gemini response: %s", clean_response)
-                
-                try:
-                    parsed = json.loads(clean_response)
-                except json.JSONDecodeError:
-                    # Fallback: extract matrix from text
-                    matrix_match = re.search(r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]", clean_response, re.DOTALL)
-                    if matrix_match:
-                        parsed = json.loads(matrix_match.group(0))
-                    else:
-                        raise ValueError("No valid JSON found in response")
-                
-                # Extract matrix from response
-                matrix = parsed.get("matrix") or parsed.get("answer") or parsed
-                matrix = [[int(x) for x in row] for row in matrix]
-                
-                logger.info("Captcha solution matrix: %s", matrix)
-                return matrix
-                
+                    
         except Exception as e:
-            logger.error("Error solving captcha: %s", e)
+            logger.error(f"Request error: {e}")
             return None
 
     async def click_captcha(self, matrix):
