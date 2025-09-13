@@ -1,10 +1,6 @@
 # DuckAI Server
 
-A simple **FastAPI** server that runs DuckDuckGo AI.  
-Two backends are supported, but the **Pyppeteer version is recommended and more up to date**:
-
-- **Pyppeteer** (preferred)
-- Playwright (alternative)
+A simple **FastAPI and Pyppeteer** server that runs DuckDuckGo AI.  
 
 ---
 
@@ -17,8 +13,6 @@ python -m venv venv
 source venv/bin/activate  # Linux/macOS
 venv\Scripts\activate     # Windows
 ```
-
-### Pyppeteer version (recommended)
 
 ```bash
 pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydantic
@@ -36,18 +30,9 @@ pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydanti
 GEMINI_API_KEY = "your free gemini key"
 ```
 
-### Playwright version (optional)
-
-```bash
-pip install fastapi uvicorn playwright requests pydantic
-playwright install chromium
-```
-
 ---
 
 ## Running the Server
-
-### Pyppeteer version
 
 Normal run:
 
@@ -58,8 +43,7 @@ python duckai-pyppeteer.py
 On Linux server (background mode):
 
 ```bash
-nohup python duckai-pyppeteer.py > server.log 2>&1 &
-disown
+nohup python duckai-pyppeteer.py > server.log 2>&1 & disown
 ```
 
 Stop the server:
@@ -70,21 +54,6 @@ pkill -f "chrome"
 ```
 
 > Note: On some systems, use **Ctrl+\\** (SIGQUIT) instead of Ctrl+C to stop it properly.
-
-### Playwright version
-
-On Linux with a virtual X server (xvfb):
-
-```bash
-nohup xvfb-run -a -s "-screen 0 1920x1080x24" python duckai-server.py > server.log 2>&1 &
-disown
-```
-
-Stop:
-
-```bash
-pkill -f "python.*duckai-server.py"
-```
 
 ---
 
