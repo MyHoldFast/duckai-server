@@ -13,7 +13,7 @@ python -m venv venv
 source venv/bin/activate  # Linux/macOS
 venv\Scripts\activate   # Windows
 
-pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydantic
+pip install fastapi uvicorn pyppeteer pyppeteer_stealth aiohttp requests pydantic python-dotenv
 ```
 
 ### Gemini API Key (for CAPTCHA solving)
