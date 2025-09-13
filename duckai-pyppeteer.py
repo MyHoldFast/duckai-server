@@ -450,7 +450,10 @@ class DDGChat:
                     return await self.ask(messages, model)
             
             raise Exception("Failed to solve captcha")
-        
+        try:
+            await self.page.evaluate("localStorage.removeItem('savedAIChats')")
+        except:
+            pass        
         self._captcha_attempts = 0
         return answer
 
