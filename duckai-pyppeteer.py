@@ -464,7 +464,7 @@ class Query(BaseModel):
     model: Optional[str] = DEFAULT_MODEL
 
 
-bot = DDGChat(headless=False)
+bot = DDGChat(headless=True)
 
 
 @asynccontextmanager
@@ -504,7 +504,7 @@ class CLIChat:
     def __init__(self, conversation_file: str = "conversation.json"):
         self.conversation_file = conversation_file
         self.conversation = self._load_conversation()
-        self.chat_bot = DDGChat(headless=False)
+        self.chat_bot = DDGChat(headless=True)
         self.current_model = DEFAULT_MODEL
     
     def _load_conversation(self):
