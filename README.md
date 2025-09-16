@@ -110,3 +110,18 @@ curl -X POST "http://localhost:8000/ask" ^
 - `meta-llama/Llama-4-Scout-17B-16E-Instruct`
 - `gpt-4o-mini`
 - `gpt-5-mini` (default)
+
+
+
+# If pyppeteer version not working use playwright version:
+
+```bash
+sudo apt-get install xvfb
+pip install fastapi uvicorn playwright requests pydantic
+playwright install chromium
+```
+
+```bash
+nohup xvfb-run -a -s "-screen 0 1920x1080x24" python duckai-playwright.py > server.log 2>&1 &
+disown
+```
