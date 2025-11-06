@@ -22,7 +22,6 @@ class DDGChat:
         self.headless = headless
         self.pw = None
         self.ready_event = asyncio.Event()
-        self._captcha_attempts = 0
         self.session = None
 
     async def start(self):
@@ -175,45 +174,88 @@ class DDGChat:
                     
                     text_response = candidates[0]["content"]["parts"][0]["text"].strip()
                     
-                    clean = re.sub(
-                        r"^```json\s*|^```\s*|\s*```$",
-                        "",
-                        text_response.strip(),
-                        flags=re.IGNORECASE
-                    )
-
-                    try:
-                        parsed = json.loads(clean)
-                    except json.JSONDecodeError:
-                        m = re.search(r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]", clean, re.DOTALL)
-                        if not m:
-                            return None
-                        parsed = json.loads(m.group(0))
-
-                    if isinstance(parsed, dict):
-                        if "matrix" in parsed:
-                            matrix = parsed["matrix"]
-                        elif "answer" in parsed:
-                            matrix = parsed["answer"]
-                        elif "response" in parsed:
-                            matrix = parsed["response"]
-                        else:
-                            for key, value in parsed.items():
-                                if isinstance(value, list) and len(value) == 3:
-                                    matrix = value
-                                    break
-                            else:
-                                return None
+                    matrix = self._parse_gemini_response(text_response)
+                    
+                    if matrix:
+                        return matrix
                     else:
-                        matrix = parsed
-
-                    matrix = [[int(x) for x in row] for row in matrix]
-                    return matrix
+                        return None
                 else:
                     return None
                     
         except:
             return None
+
+    def _parse_gemini_response(self, text_response: str):
+        clean_text = re.sub(
+            r"^```json\s*|^```\s*|\s*```$",
+            "",
+            text_response.strip(),
+            flags=re.IGNORECASE
+        )
+        
+        try:
+            parsed = json.loads(clean_text)
+            return self._extract_matrix_from_json(parsed)
+        except json.JSONDecodeError:
+            pass
+        
+        matrix_pattern = r'\[\[[^\]]*\],\s*\[[^\]]*\],\s*\[[^\]]*\]\]'
+        match = re.search(matrix_pattern, clean_text)
+        if match:
+            try:
+                matrix_str = match.group(0)
+                parsed = json.loads(matrix_str)
+                if self._is_valid_matrix(parsed):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        
+        rows = re.findall(r'\[[^\]]*\]', clean_text)
+        if len(rows) >= 3:
+            matrix = []
+            for row in rows[:3]:
+                try:
+                    row_data = json.loads(row)
+                    if len(row_data) == 3:
+                        matrix.append(row_data)
+                except json.JSONDecodeError:
+                    numbers = re.findall(r'[01]', row)
+                    if len(numbers) >= 3:
+                        matrix.append([int(num) for num in numbers[:3]])
+            
+            if len(matrix) == 3 and all(len(row) == 3 for row in matrix):
+                return matrix
+        
+        return None
+
+    def _extract_matrix_from_json(self, parsed_data):
+        if self._is_valid_matrix(parsed_data):
+            return parsed_data
+        
+        if isinstance(parsed_data, dict):
+            for key in ['captcha_solution', 'matrix', 'answer', 'solution', 'grid']:
+                if key in parsed_data:
+                    matrix = parsed_data[key]
+                    if self._is_valid_matrix(matrix):
+                        return matrix
+        
+        if isinstance(parsed_data, list) and len(parsed_data) == 1:
+            if self._is_valid_matrix(parsed_data[0]):
+                return parsed_data[0]
+        
+        return None
+
+    def _is_valid_matrix(self, matrix):
+        if not isinstance(matrix, list) or len(matrix) != 3:
+            return False
+        for row in matrix:
+            if not isinstance(row, list) or len(row) != 3:
+                return False
+            for cell in row:
+                if not isinstance(cell, (int, float)) or cell not in [0, 1]:
+                    return False
+        return True
 
     async def click_captcha(self, matrix):
         VIEW_W, VIEW_H = 1920, 1080
@@ -228,7 +270,7 @@ class DDGChat:
         SUBMIT_DELAY = 1.5
 
         try:
-            if not isinstance(matrix, list) or len(matrix) != 3:
+            if not self._is_valid_matrix(matrix):
                 return False
             
             for i, row in enumerate(matrix):
@@ -294,7 +336,6 @@ class DDGChat:
             "gpt-4o-mini",
             "gpt-5-mini"
         ]
-        MAX_CAPTCHA_ATTEMPTS = 2
 
         if model not in AVAILABLE_MODELS:
             model = "gpt-5-mini"
@@ -303,23 +344,24 @@ class DDGChat:
         answer = self._send(messages, model)
         
         if answer == "CAPTCHA_REQUIRED":
-            if self._captcha_attempts >= MAX_CAPTCHA_ATTEMPTS:
-                raise Exception("Max captcha attempts exceeded")
-                
-            self._captcha_attempts += 1
-            
             if await self._take_captcha_screenshot():
                 matrix = await self.solve_captcha_with_gemini("captcha_full.png")
-                if matrix and await self.click_captcha(matrix):
-                    await asyncio.sleep(1.0)
-                    return await self.ask(messages, model)
-            
-            raise Exception("Failed to solve captcha")
+                if matrix:
+                    ok = await self.click_captcha(matrix)
+                    if ok:
+                        await asyncio.sleep(2.0)
+                        return await self.ask(messages, model)
+                    else:
+                        raise Exception("Failed to click captcha tiles")
+                else:
+                    raise Exception("Failed to parse matrix from Gemini")
+            else:
+                raise Exception("Failed to take captcha screenshot")
+        
         try:
             await self.page.evaluate("localStorage.removeItem('savedAIChats')")
         except:
             pass        
-        self._captcha_attempts = 0
         return answer
 
 

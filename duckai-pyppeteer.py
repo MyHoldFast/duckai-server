@@ -19,17 +19,15 @@ from dotenv import load_dotenv
 
 
 class LogLevel(Enum):
-    """Logging levels"""
     SILENT = "silent"
     ERROR = "error"
     INFO = "info"
     DEBUG = "debug"
 
 load_dotenv()
-# Configure logging based on environment variable
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 if LOG_LEVEL == "SILENT":
-    logging.basicConfig(level=logging.CRITICAL + 1)  # Disable all logging
+    logging.basicConfig(level=logging.CRITICAL + 1)
 elif LOG_LEVEL == "ERROR":
     logging.basicConfig(level=logging.ERROR, format='%(levelname)s: %(message)s')
 elif LOG_LEVEL == "INFO":
@@ -39,7 +37,6 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "your_free_gemini_key")
 MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -47,7 +44,6 @@ URL_PROXY = os.environ.get("URL_PROXY")
 if URL_PROXY:
     BASE_URL = URL_PROXY + BASE_URL
 
-# UI coordinates for captcha solving
 VIEW_W, VIEW_H = 1920, 1080
 GRID_START_X = 780
 GRID_START_Y = 380
@@ -57,11 +53,9 @@ GRID_CENTER_OFFSET = 57
 SUBMIT_X = 960
 SUBMIT_Y = 735
 
-MAX_CAPTCHA_ATTEMPTS = 2
 CLICK_DELAY = 0.25
 SUBMIT_DELAY = 1.5
 
-# Supported AI models
 AVAILABLE_MODELS = [
     "claude-3-5-haiku-latest",
     "mistralai/Mistral-Small-24B-Instruct-2501", 
@@ -73,25 +67,20 @@ DEFAULT_MODEL = "gpt-5-mini"
 
 
 class DDGChat:
-    """DuckDuckGo chat interface with captcha handling."""
-    
     def __init__(self, headless: bool = True):
         self.browser = None
         self.page = None
         self.headers = None
         self.headless = headless
         self.ready_event = asyncio.Event()
-        self._captcha_attempts = 0
         self.session = None
         self.input_field = None
 
     async def start(self):
-        """Initialize browser and navigate to DuckDuckGo chat."""
         try:
             logger.info("Starting browser...")
             self.session = aiohttp.ClientSession()
             
-            # Launch browser with stealth configuration
             self.browser = await launch(
                 headless=self.headless,
                 args=[
@@ -111,7 +100,6 @@ class DDGChat:
             self.page = await self.browser.newPage()
             await self._configure_browser_stealth()
             
-            # Navigate and set up chat interface
             await self.page.goto("https://duckduckgo.com", waitUntil='networkidle0', timeout=30000)
             await self._set_local_storage_preferences()
             
@@ -121,7 +109,6 @@ class DDGChat:
                 timeout=30000
             )
             
-            # Wait for input field to be ready
             self.input_field = await self._wait_for_input(10000)
             if not self.input_field:
                 raise Exception("Input field not found")
@@ -135,14 +122,12 @@ class DDGChat:
             raise
 
     async def _configure_browser_stealth(self):
-        """Configure browser to avoid detection."""
         await self.page.setUserAgent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         await self.page.setViewport({'width': VIEW_W, 'height': VIEW_H})
         await stealth(self.page)
         
-        # Override browser properties to avoid detection
         await self.page.evaluateOnNewDocument("""
             () => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -151,11 +136,9 @@ class DDGChat:
             }
         """)
         
-        # Log network requests to capture API headers
         self.page.on('request', lambda req: asyncio.ensure_future(self._log_request(req)))
 
     async def _set_local_storage_preferences(self):
-        """Set local storage preferences for chat."""
         await self.page.evaluate("""() => {
             try {
                 localStorage.setItem('duckaiHasAgreedToTerms', 'true');
@@ -165,7 +148,6 @@ class DDGChat:
         }""")
 
     async def _take_captcha_screenshot(self):
-        """Take screenshot of captcha for analysis."""
         try:
             await self.page.screenshot({'path': 'captcha_full.png', 'fullPage': True})
             logger.info("Captcha screenshot saved")
@@ -175,7 +157,6 @@ class DDGChat:
             return False
 
     async def solve_captcha_with_gemini(self, image_path: str):
-        """Use Gemini AI to solve captcha and return 3x3 matrix."""
         url = f"{BASE_URL}/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
         
         with open(image_path, "rb") as f:
@@ -202,52 +183,17 @@ class DDGChat:
                             return None
                         
                         text_response = candidates[0]["content"]["parts"][0]["text"].strip()
+                        logger.info(f"Raw Gemini response:\n{text_response}")
+
+                        matrix = self._parse_gemini_response(text_response)
                         
-                        # Clean the response
-                        clean = re.sub(
-                            r"^```json\s*|^```\s*|\s*```$",
-                            "",
-                            text_response.strip(),
-                            flags=re.IGNORECASE
-                        )
-                        logger.info(f"Cleaned Gemini response:\n{clean}")
-
-                        # Try to parse as JSON
-                        try:
-                            parsed = json.loads(clean)
-                        except json.JSONDecodeError:
-                            # Fallback: extract matrix pattern
-                            m = re.search(r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]", clean, re.DOTALL)
-                            if not m:
-                                logger.error("No valid JSON or matrix pattern found")
-                                return None
-                            parsed = json.loads(m.group(0))
-
-                        # Extract matrix from different response formats
-                        if isinstance(parsed, dict):
-                            if "matrix" in parsed:
-                                matrix = parsed["matrix"]
-                            elif "answer" in parsed:
-                                matrix = parsed["answer"]
-                            elif "response" in parsed:
-                                matrix = parsed["response"]
-                            else:
-                                # Try to find any array value
-                                for key, value in parsed.items():
-                                    if isinstance(value, list) and len(value) == 3:
-                                        matrix = value
-                                        break
-                                else:
-                                    raise ValueError(f"Unexpected Gemini response format: {parsed}")
+                        if matrix:
+                            logger.info(f"Parsed matrix: {matrix}")
+                            return matrix
                         else:
-                            matrix = parsed
-
-                        # Convert to integer matrix
-                        matrix = [[int(x) for x in row] for row in matrix]
-                        
-                        logger.info(f"Gemini matrix: {matrix}")
-                        return matrix
-                        
+                            logger.error(f"Could not parse matrix from response: {text_response}")
+                            return None
+                            
                     except Exception as e:
                         logger.error(f"Error parsing Gemini response: {e}\nRaw response: {response_text}")
                         return None
@@ -259,21 +205,95 @@ class DDGChat:
             logger.error(f"Request error: {e}")
             return None
 
-    async def click_captcha(self, matrix):
-        """Click captcha tiles based on solution matrix."""
+    def _parse_gemini_response(self, text_response: str):
+        clean_text = re.sub(
+            r"^```json\s*|^```\s*|\s*```$",
+            "",
+            text_response.strip(),
+            flags=re.IGNORECASE
+        )
+        
         try:
-            if not isinstance(matrix, list) or len(matrix) != 3:
-                raise ValueError("Invalid matrix format")
+            parsed = json.loads(clean_text)
+            return self._extract_matrix_from_json(parsed)
+        except json.JSONDecodeError:
+            pass
+        
+        matrix_pattern = r'\[\[[^\]]*\],\s*\[[^\]]*\],\s*\[[^\]]*\]\]'
+        match = re.search(matrix_pattern, clean_text)
+        if match:
+            try:
+                matrix_str = match.group(0)
+                parsed = json.loads(matrix_str)
+                if self._is_valid_matrix(parsed):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        
+        rows = re.findall(r'\[[^\]]*\]', clean_text)
+        if len(rows) >= 3:
+            matrix = []
+            for row in rows[:3]:
+                try:
+                    row_data = json.loads(row)
+                    if len(row_data) == 3:
+                        matrix.append(row_data)
+                except json.JSONDecodeError:
+                    numbers = re.findall(r'[01]', row)
+                    if len(numbers) >= 3:
+                        matrix.append([int(num) for num in numbers[:3]])
             
-            for i, row in enumerate(matrix):
-                for j, value in enumerate(row):
-                    if int(value) == 1:
-                        cx = GRID_START_X + j * GRID_STEP_X + GRID_CENTER_OFFSET
-                        cy = GRID_START_Y + i * GRID_STEP_Y + GRID_CENTER_OFFSET
-                        logger.info("Clicking tile (%d,%d) at (%d,%d)", i, j, cx, cy)
-                        await self.page.mouse.click(cx, cy)
-                        await asyncio.sleep(CLICK_DELAY)
-            
+            if len(matrix) == 3 and all(len(row) == 3 for row in matrix):
+                return matrix
+        
+        return None
+
+    def _extract_matrix_from_json(self, parsed_data):
+        if self._is_valid_matrix(parsed_data):
+            return parsed_data
+        
+        if isinstance(parsed_data, dict):
+            for key in ['captcha_solution', 'matrix', 'answer', 'solution', 'grid']:
+                if key in parsed_data:
+                    matrix = parsed_data[key]
+                    if self._is_valid_matrix(matrix):
+                        return matrix
+        
+        if isinstance(parsed_data, list) and len(parsed_data) == 1:
+            if self._is_valid_matrix(parsed_data[0]):
+                return parsed_data[0]
+        
+        return None
+
+    def _is_valid_matrix(self, matrix):
+        if not isinstance(matrix, list) or len(matrix) != 3:
+            return False
+        for row in matrix:
+            if not isinstance(row, list) or len(row) != 3:
+                return False
+            for cell in row:
+                if not isinstance(cell, (int, float)) or cell not in [0, 1]:
+                    return False
+        return True
+
+    async def click_captcha(self, matrix):
+        try:
+            if not self._is_valid_matrix(matrix):
+                logger.error(f"Invalid matrix format: {matrix}")
+                return False
+
+            for i in range(3):
+                for j in range(3):
+                    try:
+                        if int(matrix[i][j]) == 1:
+                            cx = GRID_START_X + j * GRID_STEP_X + GRID_CENTER_OFFSET
+                            cy = GRID_START_Y + i * GRID_STEP_Y + GRID_CENTER_OFFSET
+                            logger.info("Clicking tile (%d,%d) at (%d,%d)", i, j, cx, cy)
+                            await self.page.mouse.click(cx, cy)
+                            await asyncio.sleep(CLICK_DELAY)
+                    except Exception as e:
+                        logger.error(f"Error processing cell [{i}][{j}]: {e}")
+
             await self.page.mouse.click(SUBMIT_X, SUBMIT_Y + 50)
             await asyncio.sleep(SUBMIT_DELAY)
             logger.info("Captcha submitted successfully")
@@ -284,7 +304,6 @@ class DDGChat:
             return False
 
     async def _cleanup(self):
-        """Clean up browser resources."""
         try:
             if self.page:
                 await self.page.close()
@@ -298,7 +317,6 @@ class DDGChat:
         self.ready_event.clear()
 
     async def _log_request(self, request):
-        """Log API requests to capture headers."""
         try:
             if "duckduckgo.com/duckchat/v1/chat" in request.url:
                 self.headers = request.headers
@@ -307,7 +325,6 @@ class DDGChat:
             pass
 
     async def stop(self):
-        """Stop the chat session and clean up resources."""
         try:
             if self.page:
                 await self.page.close()
@@ -322,7 +339,6 @@ class DDGChat:
             self.browser = None
 
     async def _wait_for_input(self, timeout=15000):
-        """Wait for chat input field to be available."""
         selectors = [
             'textarea[name="user-prompt"]',
             'div[contenteditable="true"]',
@@ -341,7 +357,6 @@ class DDGChat:
         return None
 
     async def _refresh_headers(self):
-        """Refresh API headers by simulating user interaction."""
         try:
             buttons = await self.page.querySelectorAll('button[type="button"]')
             for button in buttons:
@@ -355,7 +370,6 @@ class DDGChat:
                 except:
                     continue
                     
-            # Simulate typing to trigger header generation
             input_field = await self._wait_for_input()
             if input_field:
                 await input_field.click()
@@ -368,7 +382,6 @@ class DDGChat:
             raise
 
     def _filtered_headers(self):
-        """Filter and return only necessary API headers."""
         if not self.headers:
             return {}
             
@@ -383,7 +396,6 @@ class DDGChat:
         }
 
     async def _send(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
-        """Send message to DuckDuckGo chat API."""
         payload = {
             "model": model,
             "metadata": {"toolChoice": {"WebSearch": False}},
@@ -428,7 +440,6 @@ class DDGChat:
         return "".join(full_answer)
 
     async def ask(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
-        """Send message and handle captcha if required."""
         if model not in AVAILABLE_MODELS:
             logger.warning("Model %s not available, using default", model)
             model = DEFAULT_MODEL
@@ -437,28 +448,30 @@ class DDGChat:
         answer = await self._send(messages, model)
         
         if answer == "CAPTCHA_REQUIRED":
-            if self._captcha_attempts >= MAX_CAPTCHA_ATTEMPTS:
-                raise Exception("Max captcha attempts exceeded")
-                
-            self._captcha_attempts += 1
-            logger.warning("Captcha detected, attempting to solve...")
+            logger.info("Captcha detected, attempting to solve...")
             
             if await self._take_captcha_screenshot():
                 matrix = await self.solve_captcha_with_gemini("captcha_full.png")
-                if matrix and await self.click_captcha(matrix):
-                    await asyncio.sleep(1.0)
-                    return await self.ask(messages, model)
-            
-            raise Exception("Failed to solve captcha")
+                if matrix:
+                    ok = await self.click_captcha(matrix)
+                    if ok:
+                        logger.info("Captcha solved successfully, retrying request...")
+                        await asyncio.sleep(2.0)
+                        return await self.ask(messages, model)
+                    else:
+                        raise Exception("Failed to click captcha tiles")
+                else:
+                    raise Exception("Failed to parse matrix from Gemini")
+            else:
+                raise Exception("Failed to take captcha screenshot")
+        
         try:
             await self.page.evaluate("localStorage.removeItem('savedAIChats')")
         except:
             pass        
-        self._captcha_attempts = 0
         return answer
 
 
-# FastAPI Server Implementation
 class Query(BaseModel):
     messages: List[Dict[str, str]]
     model: Optional[str] = DEFAULT_MODEL
@@ -469,7 +482,6 @@ bot = DDGChat(headless=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan context manager."""
     try:
         await bot.start()
         yield
@@ -485,7 +497,6 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/ask")
 async def ask_question(query: Query):
-    """API endpoint for chat requests."""
     if not bot.ready_event.is_set():
         raise HTTPException(status_code=503, detail="Bot not ready")
     
@@ -499,8 +510,6 @@ async def ask_question(query: Query):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 class CLIChat:
-    """Command-line interface for interactive chat."""
-    
     def __init__(self, conversation_file: str = "conversation.json"):
         self.conversation_file = conversation_file
         self.conversation = self._load_conversation()
@@ -508,7 +517,6 @@ class CLIChat:
         self.current_model = DEFAULT_MODEL
     
     def _load_conversation(self):
-        """Load conversation history from file."""
         try:
             if os.path.exists(self.conversation_file):
                 with open(self.conversation_file, 'r', encoding='utf-8') as f:
@@ -518,7 +526,6 @@ class CLIChat:
         return []
     
     def _save_conversation(self):
-        """Save conversation history to file."""
         try:
             with open(self.conversation_file, 'w', encoding='utf-8') as f:
                 json.dump(self.conversation, f, ensure_ascii=False, indent=2)
@@ -526,7 +533,6 @@ class CLIChat:
             logger.error("Error saving conversation: %s", e)
     
     def _add_message(self, role: str, content: str):
-        """Add message to conversation history."""
         message = {
             "role": role,
             "content": content,
@@ -536,7 +542,6 @@ class CLIChat:
         self._save_conversation()
     
     async def start(self):
-        """Start interactive CLI chat session."""
         try:
             print("Initializing DuckDuckGo chat...")
             await self.chat_bot.start()
@@ -558,7 +563,6 @@ class CLIChat:
                     print("Conversation cleared")
                     continue
                 elif user_input.lower() == 'model':
-                    # Show numbered list of available models
                     print("\nAvailable models:")
                     for i, model_name in enumerate(AVAILABLE_MODELS, 1):
                         print(f"{i}. {model_name}")
@@ -597,7 +601,6 @@ class CLIChat:
             await self.chat_bot.stop()
 
 def main():
-    """Main entry point with CLI argument parsing."""
     parser = argparse.ArgumentParser(description="DuckDuckGo Chat Interface")
     parser.add_argument('--mode', choices=['server', 'cli'], default='server',
                        help='Run mode: server (FastAPI) or cli (interactive)')
@@ -610,15 +613,12 @@ def main():
     
     args = parser.parse_args()
     
-    # Set logging level from CLI argument
     os.environ["LOG_LEVEL"] = args.log_level
     
     if args.mode == 'cli':
-        # Run CLI chat mode
         cli_chat = CLIChat(args.conversation)
         asyncio.run(cli_chat.start())
     else:
-        # Run FastAPI server mode
         import uvicorn
         uvicorn.run(
             app,
