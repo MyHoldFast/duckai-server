@@ -38,7 +38,7 @@ else:
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "your_free_gemini_key")
-MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+MODEL_NAME = "gemini-2.5-flash"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 URL_PROXY = os.environ.get("URL_PROXY")
 if URL_PROXY:
