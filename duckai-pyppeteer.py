@@ -162,7 +162,7 @@ class DDGChat:
         with open(image_path, "rb") as f:
             img_base64 = base64.b64encode(f.read()).decode("utf-8")
         
-        prompt = "where is the duck/duck on the captcha, give the answer as a 3*3 matrix in json"
+        prompt = "where is the duck/duck on the captcha, return a JSON object with a key named 'matrix' containing a 3*3 grid"
         payload = {
             "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/png", "data": img_base64}}]}],
             "generationConfig": {"responseModalities": ["TEXT"]}
@@ -253,7 +253,7 @@ class DDGChat:
             return parsed_data
         
         if isinstance(parsed_data, dict):
-            for key in ['captcha_solution', 'matrix', 'answer', 'solution', 'grid']:
+            for key in ['captcha_solution', 'matrix', 'answer', 'solution', 'grid', 'duck_captcha']:
                 if key in parsed_data:
                     matrix = parsed_data[key]
                     if self._is_valid_matrix(matrix):
