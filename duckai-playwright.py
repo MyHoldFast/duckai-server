@@ -64,16 +64,16 @@ class DDGChat:
         """)
 
         async def log_request(request):
-            if "duckduckgo.com/duckchat/v1/chat" in request.url:
+            if "duck.ai/duckchat/v1/chat" in request.url:
                 self.headers = request.headers
 
         self.page.on("request", log_request)
-        await self.page.goto("https://duckduckgo.com", wait_until="domcontentloaded")
+        await self.page.goto("https://duck.ai", wait_until="domcontentloaded")
         await self.page.evaluate(
             "localStorage.setItem('preferredDuckaiModel', '\"203\"')"
         )
         await self.page.goto(
-            "https://duckduckgo.com/?q=DuckDuckGo+AI+Chat&ia=chat&duckai=1",
+            "https://duck.ai/duckchat/v1/chat",
             wait_until="domcontentloaded",
         )
         await self._wait_for_input()
@@ -306,7 +306,7 @@ class DDGChat:
         }
         full_answer = []
         with requests.post(
-            "https://duckduckgo.com/duckchat/v1/chat",
+            "https://duck.ai/duckchat/v1/chat",
             headers=self._filtered_headers(),
             json=payload,
             stream=True,

@@ -100,11 +100,11 @@ class DDGChat:
             self.page = await self.browser.newPage()
             await self._configure_browser_stealth()
             
-            await self.page.goto("https://duckduckgo.com", waitUntil='networkidle0', timeout=30000)
+            await self.page.goto("https://duck.ai/", waitUntil='networkidle0', timeout=30000)
             await self._set_local_storage_preferences()
             
             await self.page.goto(
-                "https://duckduckgo.com/?q=test&ia=chat&duckai=1",
+                "https://duck.ai/chat?q=test&duckai=1",
                 waitUntil='networkidle0',
                 timeout=30000
             )
@@ -318,7 +318,7 @@ class DDGChat:
 
     async def _log_request(self, request):
         try:
-            if "duckduckgo.com/duckchat/v1/chat" in request.url:
+            if "duck.ai/duckchat/v1/chat" in request.url:
                 self.headers = request.headers
                 logger.debug("API headers captured")
         except:
@@ -373,7 +373,7 @@ class DDGChat:
             input_field = await self._wait_for_input()
             if input_field:
                 await input_field.click()
-                await input_field.type(" ")
+                await input_field.type("hi")
                 await self.page.keyboard.press("Enter")
                 await asyncio.sleep(0.5)
                 
@@ -409,7 +409,7 @@ class DDGChat:
         
         try:
             async with self.session.post(
-                "https://duckduckgo.com/duckchat/v1/chat",
+                "https://duck.ai/duckchat/v1/chat",
                 headers=headers,
                 json=payload,
                 timeout=30
