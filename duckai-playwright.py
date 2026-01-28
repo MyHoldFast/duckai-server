@@ -73,7 +73,7 @@ class DDGChat:
             "localStorage.setItem('preferredDuckaiModel', '\"203\"')"
         )
         await self.page.goto(
-            "https://duck.ai/duckchat/v1/chat",
+            "https://duck.ai/chat?q=test&duckai=1",
             wait_until="domcontentloaded",
         )
         await self._wait_for_input()
