@@ -6,7 +6,7 @@ import os
 import logging
 import argparse
 from contextlib import asynccontextmanager
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, AsyncGenerator
 from datetime import datetime
 from enum import Enum
 
@@ -75,6 +75,7 @@ class DDGChat:
         self.ready_event = asyncio.Event()
         self.session = None
         self.input_field = None
+        self.api_headers_cache = {}
 
     async def start(self):
         try:
@@ -112,6 +113,9 @@ class DDGChat:
             self.input_field = await self._wait_for_input(10000)
             if not self.input_field:
                 raise Exception("Input field not found")
+            
+            # Инициализируем API сессию в браузере
+            await self._initialize_api_session()
                 
             logger.info("Input field found! Bot is ready!")
             self.ready_event.set()
@@ -136,7 +140,23 @@ class DDGChat:
             }
         """)
         
-        self.page.on('request', lambda req: asyncio.ensure_future(self._log_request(req)))
+        # Захватываем заголовки API запросов
+        self.page.on('request', lambda req: asyncio.ensure_future(self._capture_api_headers(req)))
+
+    async def _capture_api_headers(self, request):
+        try:
+            if "duck.ai/duckchat/v1/chat" in request.url:
+                headers = request.headers
+                # Сохраняем все заголовки, а не только некоторые
+                self.api_headers_cache = dict(headers)
+                logger.debug("API headers captured: %s", list(headers.keys()))
+                
+                # Также получаем VQD hash
+                vqd_hash = headers.get('x-vqd-hash-1') or headers.get('x-vqd-hash')
+                if vqd_hash:
+                    logger.debug("VQD hash captured: %s...", vqd_hash[:20])
+        except Exception as e:
+            logger.debug("Error capturing headers: %s", e)
 
     async def _set_local_storage_preferences(self):
         await self.page.evaluate("""() => {
@@ -146,6 +166,39 @@ class DDGChat:
                 localStorage.setItem('isRecentChatsOn', '"1"');
             } catch (e) {}
         }""")
+
+    async def _initialize_api_session(self):
+        """Выполняет тестовый запрос для захвата заголовков"""
+        try:
+            logger.info("Initializing API session...")
+            
+            # Выполняем небольшой запрос для получения заголовков
+            await self.page.evaluate("""async () => {
+                try {
+                    const response = await fetch('https://duck.ai/duckchat/v1/chat', {
+                        method: 'POST',
+                        headers: {
+                            'accept': 'text/event-stream',
+                            'content-type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            model: 'gpt-4o-mini',
+                            messages: [{role: 'user', content: 'hello'}],
+                            canUseTools: true,
+                            canUseApproxLocation: false,
+                            metadata: {toolChoice: {WebSearch: false}}
+                        })
+                    });
+                    // Не читаем ответ, просто отправляем запрос для захвата заголовков
+                } catch (e) {
+                    console.log('Test API call failed:', e);
+                }
+            }""")
+            
+            await asyncio.sleep(1)
+            
+        except Exception as e:
+            logger.warning("Failed to initialize API session: %s", e)
 
     async def _take_captcha_screenshot(self):
         try:
@@ -316,14 +369,6 @@ class DDGChat:
             pass
         self.ready_event.clear()
 
-    async def _log_request(self, request):
-        try:
-            if "duck.ai/duckchat/v1/chat" in request.url:
-                self.headers = request.headers
-                logger.debug("API headers captured")
-        except:
-            pass
-
     async def stop(self):
         try:
             if self.page:
@@ -357,95 +402,171 @@ class DDGChat:
         return None
 
     async def _refresh_headers(self):
+        """Обновляет API заголовки, выполняя новый запрос через браузер"""
         try:
-            buttons = await self.page.querySelectorAll('button[type="button"]')
-            for button in buttons:
-                try:
-                    text = await self.page.evaluate('(el) => el.innerText', button)
-                    if text and text.strip().lower() in ["новый чат", "запустить чат", "new chat", "start chat"]:
-                        logger.debug("Found chat button, clicking...")
-                        await button.click()
-                        await asyncio.sleep(0.5)
-                        break
-                except:
-                    continue
-                    
-            input_field = await self._wait_for_input()
-            if input_field:
-                await input_field.click()
-                await input_field.type("hi")
-                await self.page.keyboard.press("Enter")
-                await asyncio.sleep(0.5)
-                
+            logger.debug("Refreshing API headers...")
+            
+            # Выполняем запрос через браузер для получения свежих заголовков
+            await self.page.evaluate("""async () => {
+                try {
+                    const response = await fetch('https://duck.ai/duckchat/v1/chat', {
+                        method: 'POST',
+                        headers: {
+                            'accept': 'text/event-stream',
+                            'content-type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            model: 'gpt-4o-mini',
+                            messages: [{role: 'user', content: 'test'}],
+                            canUseTools: true,
+                            canUseApproxLocation: false,
+                            metadata: {toolChoice: {WebSearch: false}}
+                        })
+                    });
+                } catch (e) {
+                    console.error('Failed to refresh headers:', e);
+                }
+            }""")
+            
+            await asyncio.sleep(0.5)
+            
         except Exception as e:
             logger.error("Error refreshing headers: %s", e)
-            raise
 
-    def _filtered_headers(self):
-        if not self.headers:
-            return {}
-            
-        return {
-            k: v for k, v in self.headers.items()
-            if k.lower() in [
-                "accept", "content-type", "origin", "referer",
-                "user-agent", "x-fe-signals", "x-fe-version",
-                "x-vqd-hash-1", "sec-ch-ua", "sec-ch-ua-mobile",
-                "sec-ch-ua-platform",
-            ]
-        }
+    def _get_api_headers(self):
+        """Возвращает заголовки для API запроса"""
+        if not self.api_headers_cache:
+            logger.warning("No API headers cached, using defaults")
+            return {
+                "accept": "text/event-stream",
+                "accept-language": "en-US,en;q=0.9",
+                "cache-control": "no-cache",
+                "content-type": "application/json",
+                "pragma": "no-cache",
+                "priority": "u=1, i",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+                "x-fe-version": "serp_20250401_100419_ET-19d438eb199b2bf7c300",
+            }
+        
+        # Фильтруем заголовки, оставляя только нужные
+        filtered_headers = {}
+        important_headers = [
+            'accept', 'accept-language', 'cache-control', 'content-type',
+            'pragma', 'priority', 'sec-fetch-dest', 'sec-fetch-mode',
+            'sec-fetch-site', 'x-fe-version', 'x-vqd-hash-1', 'x-vqd-hash',
+            'user-agent', 'referer', 'origin'
+        ]
+        
+        for header in important_headers:
+            for key, value in self.api_headers_cache.items():
+                if key.lower() == header.lower():
+                    filtered_headers[key] = value
+                    break
+        
+        # Добавляем обязательные заголовки, если их нет
+        if 'accept' not in filtered_headers:
+            filtered_headers['accept'] = 'text/event-stream'
+        if 'content-type' not in filtered_headers:
+            filtered_headers['content-type'] = 'application/json'
+        
+        return filtered_headers
 
-    async def _send(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
-        payload = {
-            "model": model,
-            "metadata": {"toolChoice": {"WebSearch": False}},
-            "messages": messages,
-            "canUseTools": True,
-            "canUseApproxLocation": False,
-        }
-        
-        headers = self._filtered_headers()
-        full_answer = []
-        
+    async def _send_via_browser(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
+        """Отправляет запрос через браузерную сессию"""
         try:
-            async with self.session.post(
-                "https://duck.ai/duckchat/v1/chat",
-                headers=headers,
-                json=payload,
-                timeout=30
-            ) as response:
-                if response.status == 418:
-                    return "CAPTCHA_REQUIRED"
-                if response.status != 200:
-                    return f"HTTP error {response.status}: {await response.text()}"
-                
-                async for line in response.content:
-                    line = line.decode("utf-8").strip()
-                    if line.startswith("data: "):
-                        data_line = line[6:]
-                        if data_line == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data_line)
-                            if "message" in obj:
-                                full_answer.append(obj["message"])
-                            elif obj.get("action") == "error" and obj.get("type") == "ERR_CHALLENGE":
-                                return "CAPTCHA_REQUIRED"
-                        except:
-                            continue
-                            
-        except Exception as e:
-            return f"Request error: {str(e)}"
+            payload = {
+                "model": model,
+                "metadata": {"toolChoice": {"WebSearch": False}},
+                "messages": messages,
+                "canUseTools": True,
+                "canUseApproxLocation": False,
+            }
             
-        return "".join(full_answer)
+            logger.debug("Sending request via browser: %s", payload)
+            
+            # Выполняем запрос через браузер
+            result = await self.page.evaluate("""async (payload) => {
+                try {
+                    const response = await fetch('https://duck.ai/duckchat/v1/chat', {
+                        method: 'POST',
+                        headers: {
+                            'accept': 'text/event-stream',
+                            'accept-language': 'en-US,en;q=0.9',
+                            'cache-control': 'no-cache',
+                            'content-type': 'application/json',
+                            'pragma': 'no-cache',
+                            'priority': 'u=1, i',
+                            'sec-fetch-dest': 'empty',
+                            'sec-fetch-mode': 'cors',
+                            'sec-fetch-site': 'same-origin',
+                            'x-fe-version': 'serp_20250401_100419_ET-19d438eb199b2bf7c300',
+                        },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (response.status === 418) {
+                        return { error: 'CAPTCHA_REQUIRED' };
+                    }
+                    
+                    if (!response.ok) {
+                        return { error: `HTTP error ${response.status}` };
+                    }
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let fullAnswer = '';
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\\n');
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const dataLine = line.slice(6);
+                                if (dataLine === '[DONE]') break;
+                                
+                                try {
+                                    const obj = JSON.parse(dataLine);
+                                    if (obj.message) {
+                                        fullAnswer += obj.message;
+                                    } else if (obj.action === 'error' && obj.type === 'ERR_CHALLENGE') {
+                                        return { error: 'CAPTCHA_REQUIRED' };
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                    
+                    return { answer: fullAnswer };
+                    
+                } catch (error) {
+                    return { error: error.toString() };
+                }
+            }""", payload)
+            
+            if 'error' in result:
+                if result['error'] == 'CAPTCHA_REQUIRED':
+                    return 'CAPTCHA_REQUIRED'
+                else:
+                    raise Exception(f"Browser request error: {result['error']}")
+            
+            return result.get('answer', '')
+            
+        except Exception as e:
+            logger.error("Error in browser request: %s", e)
+            raise
 
     async def ask(self, messages: List[Dict[str, str]], model: str = DEFAULT_MODEL):
         if model not in AVAILABLE_MODELS:
             logger.warning("Model %s not available, using default", model)
             model = DEFAULT_MODEL
             
-        await self._refresh_headers()
-        answer = await self._send(messages, model)
+        answer = await self._send_via_browser(messages, model)
         
         if answer == "CAPTCHA_REQUIRED":
             logger.info("Captcha detected, attempting to solve...")
@@ -465,10 +586,6 @@ class DDGChat:
             else:
                 raise Exception("Failed to take captcha screenshot")
         
-        try:
-            await self.page.evaluate("localStorage.removeItem('savedAIChats')")
-        except:
-            pass        
         return answer
 
 
